@@ -28,6 +28,32 @@ function audioProxyUrl(file: string) {
   return `/api/audio?path=${encodeURIComponent(file)}`;
 }
 
+const SAMPLE_PROMPT = "Zamba argentina romántica y emotiva, guitarra criolla protagonista, bombo legüero suave, cuerdas cálidas, voz masculina expresiva, producción orgánica, tempo estable y estribillo memorable.";
+
+const SAMPLE_LYRICS = `[Intro]
+
+[Verse 1]
+Vuelvo despacio por la misma huella,
+donde tu risa se quedó a esperar,
+traigo en el pecho una canción sencilla,
+para encontrarte una vez más.
+
+[Verse 2]
+Cruza la tarde sobre los cerros,
+la luna empieza despacio a alumbrar,
+y en cada cuerda vuelve tu recuerdo,
+como un camino hacia tu mirar.
+
+[Chorus]
+Volver a encontrarte,
+volver a cantar,
+que todo lo perdido
+se pueda abrazar.
+Volver a encontrarte,
+sin miedo al final,
+con esta zamba nueva
+que te quiere alcanzar.`;
+
 export default function Home() {
   const [prompt, setPrompt] = useState("Zamba argentina romántica, guitarra criolla, bombo legüero sutil, cuerdas cálidas, voz masculina emotiva, producción orgánica y moderna");
   const [lyrics, setLyrics] = useState("[Intro]\n\n[Verse 1]\n\n[Chorus]\n");
@@ -44,6 +70,23 @@ export default function Home() {
   const [statusText, setStatusText] = useState("Listo para crear.");
   const [tracks, setTracks] = useState<Track[]>([]);
   const [error, setError] = useState("");
+
+  function loadSampleSong() {
+    setPrompt(SAMPLE_PROMPT);
+    setLyrics(SAMPLE_LYRICS);
+    setBpm("84");
+    setDuration("75");
+    setKeyscale("G Major");
+    setTimesignature("3");
+    setBatchSize("1");
+    setSeed("");
+    setInstrumental(false);
+    setFormat("wav");
+    setTracks([]);
+    setTaskId(null);
+    setError("");
+    setStatusText("Canción de muestra cargada. Tocá Generar canción.");
+  }
 
   const summary = useMemo(
     () => `${duration}s · ${bpm || "auto"} BPM · ${keyscale || "tono auto"} · ${timesignature}/${timesignature === "6" ? "8" : "4"}`,
@@ -167,6 +210,16 @@ export default function Home() {
           <div className="grid">
             <form className="card" onSubmit={submit}>
               <div className="sectionTitle">Composición</div>
+
+              <div className="sampleBox">
+                <div>
+                  <strong>♫ Canción de muestra</strong>
+                  <div className="muted">Una zamba breve ya preparada para probar SHUNO de punta a punta.</div>
+                </div>
+                <button className="sampleBtn" type="button" onClick={loadSampleSong} disabled={loading}>
+                  Cargar muestra
+                </button>
+              </div>
 
               <div className="field">
                 <label>Descripción musical</label>
