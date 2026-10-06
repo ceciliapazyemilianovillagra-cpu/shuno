@@ -2,10 +2,16 @@
 
 import { FormEvent, useMemo, useState } from "react";
 
+type Engine = "suno" | "ace";
+
 type Track = {
   file?: string;
+  image?: string;
+  title?: string;
   prompt?: string;
-  lyrics?: string;
+  model?: string;
+  duration?: number;
+  engine?: string;
   metas?: {
     bpm?: number;
     duration?: number;
@@ -17,8 +23,9 @@ type Track = {
   dit_model?: string;
 };
 
-function audioProxyUrl(file: string) {
+function audioUrl(file: string) {
   if (!file) return "";
+  if (/^https?:\/\//i.test(file)) return file;
   if (file.startsWith("/v1/audio")) {
     const q = file.split("?")[1] ?? "";
     const params = new URLSearchParams(q);
@@ -28,7 +35,8 @@ function audioProxyUrl(file: string) {
   return `/api/audio?path=${encodeURIComponent(file)}`;
 }
 
-const SAMPLE_PROMPT = "Zamba argentina romántica y emotiva, guitarra criolla protagonista, bombo legüero suave, cuerdas cálidas, voz masculina expresiva, producción orgánica, tempo estable y estribillo memorable.";
+const SAMPLE_PROMPT =
+  "Zamba argentina romántica y emotiva, guitarra criolla protagonista, bombo legüero suave, cuerdas cálidas, voz masculina expresiva, producción orgánica, tempo estable y estribillo memorable.";
 
 const SAMPLE_LYRICS = `[Intro]
 
@@ -55,7 +63,12 @@ con esta zamba nueva
 que te quiere alcanzar.`;
 
 export default function Home() {
-  const [prompt, setPrompt] = useState("Zamba argentina romántica, guitarra criolla, bombo legüero sutil, cuerdas cálidas, voz masculina emotiva, producción orgánica y moderna");
+  const [engine, setEngine] = useState<Engine>("suno");
+  const [title, setTitle] = useState("Volver a encontrarte");
+  const [model, setModel] = useState("V4_5PLUS");
+  const [prompt, setPrompt] = useState(
+    "Zamba argentina romántica, guitarra criolla, bombo legüero sutil, cuerdas cálidas, voz masculina emotiva, producción orgánica y moderna"
+  );
   const [lyrics, setLyrics] = useState("[Intro]\n\n[Verse 1]\n\n[Chorus]\n");
   const [bpm, setBpm] = useState("84");
   const [duration, setDuration] = useState("210");
@@ -72,6 +85,7 @@ export default function Home() {
   const [error, setError] = useState("");
 
   function loadSampleSong() {
+    setTitle("Volver a encontrarte");
     setPrompt(SAMPLE_PROMPT);
     setLyrics(SAMPLE_LYRICS);
     setBpm("84");
@@ -88,19 +102,24 @@ export default function Home() {
     setStatusText("Canción de muestra cargada. Tocá Generar canción.");
   }
 
-  const summary = useMemo(
-    () => `${duration}s · ${bpm || "auto"} BPM · ${keyscale || "tono auto"} · ${timesignature}/${timesignature === "6" ? "8" : "4"}`,
-    [duration, bpm, keyscale, timesignature]
-  );
+  const summary = useMemo(() => {
+    const meter = timesignature === "6" ? "6/8" : `${timesignature}/4`;
+    if (engine === "suno") {
+      return `Suno API · ${model} · ${bpm || "auto"} BPM · ${keyscale || "tono auto"} · ${meter}`;
+    }
+    return `ACE-Step · ${duration}s · ${bpm || "auto"} BPM · ${keyscale || "tono auto"} · ${meter}`;
+  }, [engine, model, duration, bpm, keyscale, timesignature]);
 
-  async function poll(id: string) {
-    for (let attempt = 0; attempt < 180; attempt++) {
+  async function poll(id: string, selectedEngine: Engine) {
+    for (let attempt = 0; attempt < 240; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
+
       const response = await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task_id: id }),
+        body: JSON.stringify({ task_id: id, engine: selectedEngine }),
       });
+
       const payload = await response.json();
 
       if (!response.ok || payload?.error) {
@@ -111,7 +130,8 @@ export default function Home() {
       if (!item) continue;
 
       if (item.status === 0) {
-        setStatusText(`Generando… intento ${attempt + 1}`);
+        const stage = item.stage ? ` · ${item.stage}` : "";
+        setStatusText(`Generando…${stage}`);
         continue;
       }
 
@@ -126,11 +146,13 @@ export default function Home() {
         } catch {
           parsed = [];
         }
+
         setTracks(Array.isArray(parsed) ? parsed : []);
         setStatusText("¡Canción terminada!");
         return;
       }
     }
+
     throw new Error("La generación tardó demasiado. El trabajo puede seguir activo en el motor.");
   }
 
@@ -140,13 +162,16 @@ export default function Home() {
     setTracks([]);
     setTaskId(null);
     setLoading(true);
-    setStatusText("Enviando la canción al motor…");
+    setStatusText(engine === "suno" ? "Enviando a Suno API…" : "Enviando a ACE-Step…");
 
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          engine,
+          title,
+          model,
           prompt,
           lyrics,
           bpm: bpm ? Number(bpm) : undefined,
@@ -161,6 +186,7 @@ export default function Home() {
       });
 
       const payload = await response.json();
+
       if (!response.ok || payload?.error) {
         throw new Error(payload?.error || "No se pudo iniciar la generación.");
       }
@@ -169,8 +195,8 @@ export default function Home() {
       if (!id) throw new Error("El motor no devolvió un task_id.");
 
       setTaskId(id);
-      setStatusText("En cola. SHUNO está componiendo…");
-      await poll(id);
+      setStatusText(engine === "suno" ? "Suno está creando la canción…" : "ACE-Step está componiendo…");
+      await poll(id, engine);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ocurrió un error inesperado.");
       setStatusText("No se pudo completar la generación.");
@@ -186,7 +212,7 @@ export default function Home() {
           <div className="logo">S</div>
           <span>SHUNO</span>
         </div>
-        <span className="badge">AI MUSIC STUDIO · v0.1</span>
+        <span className="badge">AI MUSIC STUDIO · v0.2</span>
       </header>
 
       <div className="layout">
@@ -202,27 +228,74 @@ export default function Home() {
           <div className="hero">
             <div>
               <h1>Tu canción,<br />a tu manera.</h1>
-              <p>SHUNO transforma letra, estilo y parámetros musicales en una generación completa usando tu propio motor ACE-Step.</p>
+              <p>SHUNO puede generar con Suno API o con nuestro motor ACE-Step en GPU. Elegí el motor y creá.</p>
             </div>
-            <span className="pill">● Motor externo configurable</span>
+            <span className="pill">● SHUNO v0.2 · doble motor</span>
           </div>
 
           <div className="grid">
             <form className="card" onSubmit={submit}>
-              <div className="sectionTitle">Composición</div>
+              <div className="sectionTitle">Motor</div>
+
+              <div className="engineSwitch">
+                <button
+                  type="button"
+                  className={engine === "suno" ? "engineBtn active" : "engineBtn"}
+                  onClick={() => setEngine("suno")}
+                  disabled={loading}
+                >
+                  <strong>Suno API</strong>
+                  <span>Sin Colab · usa créditos</span>
+                </button>
+                <button
+                  type="button"
+                  className={engine === "ace" ? "engineBtn active" : "engineBtn"}
+                  onClick={() => setEngine("ace")}
+                  disabled={loading}
+                >
+                  <strong>SHUNO Local</strong>
+                  <span>ACE-Step · usa GPU/Colab</span>
+                </button>
+              </div>
+
+              <div className="sectionTitle" style={{ marginTop: 22 }}>Composición</div>
 
               <div className="sampleBox">
                 <div>
                   <strong>♫ Canción de muestra</strong>
-                  <div className="muted">Una zamba breve ya preparada para probar SHUNO de punta a punta.</div>
+                  <div className="muted">Zamba preparada para probar SHUNO de punta a punta.</div>
                 </div>
                 <button className="sampleBtn" type="button" onClick={loadSampleSong} disabled={loading}>
                   Cargar muestra
                 </button>
               </div>
 
+              <div className="row">
+                <div className="field">
+                  <label>Título</label>
+                  <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80} />
+                </div>
+
+                {engine === "suno" ? (
+                  <div className="field">
+                    <label>Modelo Suno</label>
+                    <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
+                      <option value="V4_5PLUS">V4.5 Plus</option>
+                      <option value="V4_5">V4.5</option>
+                      <option value="V4">V4</option>
+                      <option value="V3_5">V3.5</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="field">
+                    <label>Duración (seg.)</label>
+                    <input className="input" type="number" min="10" max="600" value={duration} onChange={(e) => setDuration(e.target.value)} />
+                  </div>
+                )}
+              </div>
+
               <div className="field">
-                <label>Descripción musical</label>
+                <label>Descripción musical / estilo</label>
                 <textarea
                   className="textarea"
                   style={{ minHeight: 112 }}
@@ -250,8 +323,8 @@ export default function Home() {
                   <input className="input" type="number" min="30" max="300" value={bpm} onChange={(e) => setBpm(e.target.value)} />
                 </div>
                 <div className="field">
-                  <label>Duración (seg.)</label>
-                  <input className="input" type="number" min="10" max="600" value={duration} onChange={(e) => setDuration(e.target.value)} />
+                  <label>Tonalidad</label>
+                  <input className="input" value={keyscale} onChange={(e) => setKeyscale(e.target.value)} placeholder="G Major, Am..." />
                 </div>
                 <div className="field">
                   <label>Compás</label>
@@ -264,37 +337,36 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="row">
-                <div className="field">
-                  <label>Tonalidad</label>
-                  <input className="input" value={keyscale} onChange={(e) => setKeyscale(e.target.value)} placeholder="G Major, Am..." />
+              {engine === "ace" ? (
+                <div className="row3">
+                  <div className="field">
+                    <label>Versiones</label>
+                    <select className="select" value={batchSize} onChange={(e) => setBatchSize(e.target.value)}>
+                      <option value="1">1 versión</option>
+                      <option value="2">2 versiones</option>
+                      <option value="3">3 versiones</option>
+                      <option value="4">4 versiones</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Formato</label>
+                    <select className="select" value={format} onChange={(e) => setFormat(e.target.value)}>
+                      <option value="wav">WAV</option>
+                      <option value="mp3">MP3</option>
+                      <option value="flac">FLAC</option>
+                      <option value="opus">OPUS</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Seed opcional</label>
+                    <input className="input" type="number" value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="Aleatorio" />
+                  </div>
                 </div>
-                <div className="field">
-                  <label>Formato</label>
-                  <select className="select" value={format} onChange={(e) => setFormat(e.target.value)}>
-                    <option value="wav">WAV</option>
-                    <option value="mp3">MP3</option>
-                    <option value="flac">FLAC</option>
-                    <option value="opus">OPUS</option>
-                  </select>
+              ) : (
+                <div className="engineNote">
+                  Suno API devuelve sus propias variaciones y audio MP3. BPM, tonalidad y compás se agregan a la descripción del estilo.
                 </div>
-              </div>
-
-              <div className="row">
-                <div className="field">
-                  <label>Versiones</label>
-                  <select className="select" value={batchSize} onChange={(e) => setBatchSize(e.target.value)}>
-                    <option value="1">1 versión</option>
-                    <option value="2">2 versiones</option>
-                    <option value="3">3 versiones</option>
-                    <option value="4">4 versiones</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Seed opcional</label>
-                  <input className="input" type="number" value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="Aleatorio" />
-                </div>
-              </div>
+              )}
 
               <label className="pill" style={{ marginBottom: 18, cursor: "pointer" }}>
                 <input type="checkbox" checked={instrumental} onChange={(e) => setInstrumental(e.target.checked)} />
@@ -302,7 +374,7 @@ export default function Home() {
               </label>
 
               <button className="generate" disabled={loading} type="submit">
-                {loading ? "SHUNO está creando…" : "✦ Generar canción"}
+                {loading ? "SHUNO está creando…" : `✦ Generar con ${engine === "suno" ? "Suno API" : "ACE-Step"}`}
               </button>
 
               <p className="muted" style={{ marginBottom: 0 }}>{summary}</p>
@@ -323,18 +395,26 @@ export default function Home() {
               ) : (
                 <div className="tracks">
                   {tracks.map((track, index) => {
-                    const src = track.file ? audioProxyUrl(track.file) : "";
+                    const src = track.file ? audioUrl(track.file) : "";
+                    const displayModel = track.model || track.dit_model || (engine === "suno" ? "Suno" : "ACE-Step");
+
                     return (
                       <article className="track" key={`${track.file}-${index}`}>
+                        {track.image ? <img className="trackImage" src={track.image} alt="" /> : null}
                         <div className="trackTop">
                           <div>
-                            <strong>Versión {index + 1}</strong>
-                            <div><small>{track.metas?.bpm || bpm} BPM · {track.metas?.keyscale || keyscale}</small></div>
+                            <strong>{track.title || `Versión ${index + 1}`}</strong>
+                            <div>
+                              <small>
+                                {track.duration ? `${Math.round(Number(track.duration))}s · ` : ""}
+                                {track.metas?.bpm || bpm} BPM
+                              </small>
+                            </div>
                           </div>
-                          <span className="badge">{track.dit_model || "ACE-Step"}</span>
+                          <span className="badge">{displayModel}</span>
                         </div>
                         {src ? <audio controls preload="metadata" src={src} /> : null}
-                        {src ? <a className="download" href={src} download>↓ Descargar audio</a> : null}
+                        {src ? <a className="download" href={src} target="_blank" rel="noreferrer">↓ Abrir / descargar audio</a> : null}
                       </article>
                     );
                   })}
